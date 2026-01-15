@@ -52,4 +52,7 @@ services:
 # Example: Run with cron on the host
 # 0 3 * * * cd /path/to/gitlab-backup && docker-compose run --rm gitlab-backup
 
+# Example: Run a manual backup immediately (even if daemon is running)
+# docker exec <container_name> gitlab-backup --now
+
 # Or use Kubernetes CronJob, systemd timer, etc.
