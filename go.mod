@@ -2,7 +2,10 @@ module github.com/go-gitlab-backup
 
 go 1.24.0
 
-require github.com/docker/docker v27.5.1+incompatible
+require (
+	github.com/docker/docker v27.5.1+incompatible
+	github.com/robfig/cron/v3 v3.0.1
+)
 
 require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect

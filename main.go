@@ -11,14 +11,17 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/robfig/cron/v3"
 )
 
 // Config holds the backup configuration
@@ -39,14 +42,13 @@ type Config struct {
 	// Optional features
 	ZipPassword       string // if set, re-zip backup with password
 	DiscordWebhookURL string // if set, send notifications
+
+	// Scheduling
+	CronSchedule string // if set, run on schedule (e.g., "0 3 * * *" for 3 AM daily)
 }
 
 func main() {
 	cfg := parseFlags()
-	var finalErr error
-	var backupFile string
-	var uploadFile string
-	startTime := time.Now()
 
 	log.Println("=== GitLab Backup Tool ===")
 	log.Printf("Container: %s", cfg.GitLabContainerName)
@@ -56,31 +58,71 @@ func main() {
 		log.Println("Password protection: enabled")
 	}
 
-	ctx := context.Background()
+	// If cron schedule is set, run as daemon
+	if cfg.CronSchedule != "" {
+		runWithScheduler(cfg)
+		return
+	}
 
-	defer func() {
-		duration := time.Since(startTime)
-		if finalErr != nil {
-			sendDiscordNotification(cfg, false, finalErr.Error(), backupFile, duration)
-			log.Fatalf("Backup failed: %v", finalErr)
-		} else {
-			sendDiscordNotification(cfg, true, "", uploadFile, duration)
-			log.Println("=== Backup completed successfully ===")
+	// Otherwise, run once and exit
+	if err := runBackup(cfg); err != nil {
+		log.Fatalf("Backup failed: %v", err)
+	}
+}
+
+// runWithScheduler starts the cron scheduler and blocks until SIGTERM/SIGINT
+func runWithScheduler(cfg Config) {
+	log.Printf("Cron schedule: %s", cfg.CronSchedule)
+	log.Println("Starting scheduler daemon...")
+
+	c := cron.New(cron.WithLogger(cron.VerbosePrintfLogger(log.Default())))
+
+	_, err := c.AddFunc(cfg.CronSchedule, func() {
+		log.Println("Scheduled backup triggered")
+		if err := runBackup(cfg); err != nil {
+			log.Printf("Scheduled backup failed: %v", err)
 		}
-	}()
+	})
+	if err != nil {
+		log.Fatalf("Invalid cron schedule %q: %v", cfg.CronSchedule, err)
+	}
+
+	c.Start()
+	log.Printf("Scheduler started. Next run: %v", c.Entries()[0].Next)
+
+	// Wait for shutdown signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down scheduler...")
+	ctx := c.Stop()
+	<-ctx.Done()
+	log.Println("Scheduler stopped")
+}
+
+// runBackup executes the backup workflow once
+func runBackup(cfg Config) error {
+	var backupFile string
+	var uploadFile string
+	startTime := time.Now()
+
+	ctx := context.Background()
 
 	// Step 1: Create GitLab backup via Docker exec
 	if err := createGitLabBackup(ctx, cfg); err != nil {
-		finalErr = fmt.Errorf("failed to create GitLab backup: %w", err)
-		return
+		err = fmt.Errorf("failed to create GitLab backup: %w", err)
+		sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
+		return err
 	}
 
 	// Step 2: Find and verify the latest backup
 	var err error
 	backupFile, err = findLatestBackup(cfg)
 	if err != nil {
-		finalErr = fmt.Errorf("failed to find latest backup: %w", err)
-		return
+		err = fmt.Errorf("failed to find latest backup: %w", err)
+		sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
+		return err
 	}
 	log.Printf("Latest backup found: %s", backupFile)
 
@@ -89,17 +131,24 @@ func main() {
 	if cfg.ZipPassword != "" {
 		uploadFile, err = createPasswordZip(backupFile, cfg.ZipPassword)
 		if err != nil {
-			finalErr = fmt.Errorf("failed to create password zip: %w", err)
-			return
+			err = fmt.Errorf("failed to create password zip: %w", err)
+			sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
+			return err
 		}
 		log.Printf("Created password-protected zip: %s", filepath.Base(uploadFile))
 	}
 
 	// Step 3: Upload to rclone remotes
 	if err := uploadToRemotes(cfg, uploadFile); err != nil {
-		finalErr = fmt.Errorf("failed to upload backup: %w", err)
-		return
+		err = fmt.Errorf("failed to upload backup: %w", err)
+		sendDiscordNotification(cfg, false, err.Error(), uploadFile, time.Since(startTime))
+		return err
 	}
+
+	duration := time.Since(startTime)
+	sendDiscordNotification(cfg, true, "", uploadFile, duration)
+	log.Printf("=== Backup completed successfully (took %v) ===", duration.Round(time.Second))
+	return nil
 }
 
 func parseFlags() Config {
@@ -116,6 +165,7 @@ func parseFlags() Config {
 
 	cfg.ZipPassword = getEnv("ZIP_PASSWORD", "")
 	cfg.DiscordWebhookURL = getEnv("DISCORD_WEBHOOK_URL", "")
+	cfg.CronSchedule = getEnv("CRON_SCHEDULE", "")
 
 	remotesStr := getEnv("RCLONE_REMOTES", "")
 	flag.Func("remotes", "Comma-separated list of rclone remotes (e.g., remote1:path,remote2:path)", func(s string) error {
