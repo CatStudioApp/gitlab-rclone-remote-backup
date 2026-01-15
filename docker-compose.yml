@@ -43,7 +43,7 @@ services:
       # DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
     
     # Run once and exit
-    restart: "no"
+    restart: "always"
 
 # Example: Run with cron on the host
 # 0 3 * * * cd /path/to/gitlab-backup && docker-compose run --rm gitlab-backup
