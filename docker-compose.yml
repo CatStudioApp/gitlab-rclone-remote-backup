@@ -35,6 +35,12 @@ services:
       
       # Path to rclone config (inside container)
       RCLONE_CONFIG: /config/rclone/rclone.conf
+      
+      # Optional: Password to encrypt backup with zip
+      # ZIP_PASSWORD: "your-secure-password"
+      
+      # Optional: Discord webhook for notifications
+      # DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
     
     # Run once and exit
     restart: "no"

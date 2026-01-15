@@ -19,9 +19,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /gitlab-backup .
 # Runtime stage
 FROM alpine:3.21
 
-# Install rclone and ca-certificates
+# Install rclone, zip and ca-certificates
 RUN apk add --no-cache \
     rclone \
+    zip \
     ca-certificates \
     tzdata
 
