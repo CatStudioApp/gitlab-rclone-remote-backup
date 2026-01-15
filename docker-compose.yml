@@ -41,6 +41,10 @@ services:
       
       # Optional: Discord webhook for notifications
       # DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
+      
+      # Optional: Cron schedule (if set, runs as daemon; otherwise runs once)
+      # Examples: "0 3 * * *" (3 AM daily), "0 */6 * * *" (every 6 hours)
+      CRON_SCHEDULE: "0 3 * * *"
     
     # Run once and exit
     restart: "always"

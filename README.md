@@ -56,6 +56,7 @@ docker-compose run --rm gitlab-backup
 | `RCLONE_CONFIG` | `-rclone-config` | `/config/rclone/rclone.conf` | Rclone config path |
 | `ZIP_PASSWORD` | - | (optional) | Password to encrypt backup |
 | `DISCORD_WEBHOOK_URL` | - | (optional) | Discord webhook for notifications |
+| `CRON_SCHEDULE` | - | (optional) | Cron expression for scheduled runs (e.g., `0 3 * * *`) |
 
 ## Required Mounts
 
