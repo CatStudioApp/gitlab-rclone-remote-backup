@@ -11,7 +11,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       
       # Required: GitLab backup directory (where gitlab-rake creates backups)
-      - /srv/gitlab/data/backups:/backups:ro
+      - /srv/gitlab/data/backups:/backups
       
       # Required: Rclone configuration
       - ~/.config/rclone:/config/rclone:ro
@@ -47,7 +47,7 @@ services:
       CRON_SCHEDULE: "0 3 * * *"
     
     # Run once and exit
-    restart: "always"
+    restart: "no"
 
 # Example: Run with cron on the host
 # 0 3 * * * cd /path/to/gitlab-backup && docker-compose run --rm gitlab-backup

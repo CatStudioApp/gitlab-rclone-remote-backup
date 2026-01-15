@@ -22,7 +22,6 @@ FROM alpine:3.21
 # Install rclone, zip and ca-certificates
 RUN apk add --no-cache \
     rclone \
-    zip \
     ca-certificates \
     tzdata
 

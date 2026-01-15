@@ -4,7 +4,7 @@ This project is a specialized utility to backup a self-hosted GitLab instance an
 
 ## Architecture
 
-1.  **Language**: Go (Go 1.23+)
+1.  **Language**: Go (Go 1.24+)
 2.  **Runtime**: Docker (Alpine-based)
 3.  **Core Logic**: `main.go`
     *   Connects to Host Docker Daemon via `/var/run/docker.sock`.
@@ -19,7 +19,7 @@ This project is a specialized utility to backup a self-hosted GitLab instance an
 *   `main.go`: Single-file entry point containing all logic.
 *   `Dockerfile`: Multi-stage build.
     *   Stage 1: Golang builder.
-    *   Stage 2: Alpine runtime with `rclone`, `zip`, `ca-certificates`.
+    *   Stage 2: Alpine runtime with `rclone`, `ca-certificates`.
 *   `.github/workflows/docker.yml`: Builds multi-arch (amd64/arm64) images to GHCR.
 
 ## Environment Configuration
@@ -39,7 +39,7 @@ The application is configured entirely via Environment Variables:
 
 1.  **Docker Compatibility**: The tool relies on the Docker Socket. When testing locally, ensure you have access to a Docker daemon or mock the interactions.
 2.  **Rclone Dependency**: The runtime image MUST have `rclone` installed. `main.go` calls the `rclone` binary via `os/exec`.
-3.  **Go Version**: Keep `go.mod` aligned with the Dockerfile (currently `1.23`).
+3.  **Go Version**: Keep `go.mod` aligned with the Dockerfile (currently `1.24`).
 4.  **Linting**: Run `go mod tidy` and formatting before commits.
 
 ## Common Operations

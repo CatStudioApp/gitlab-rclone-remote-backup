@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9
 )
 
 require (
@@ -30,6 +31,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect

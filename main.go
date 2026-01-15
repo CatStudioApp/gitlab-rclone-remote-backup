@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/robfig/cron/v3"
+	"github.com/yeka/zip"
 )
 
 // Config holds the backup configuration
@@ -135,6 +136,13 @@ func runBackup(cfg Config) error {
 			sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
 			return err
 		}
+		// Ensure temporary zip file is cleaned up after upload (or failure)
+		defer func() {
+			log.Printf("Cleaning up temporary zip: %s", uploadFile)
+			if err := os.Remove(uploadFile); err != nil {
+				log.Printf("Warning: failed to remove temporary zip: %v", err)
+			}
+		}()
 		log.Printf("Created password-protected zip: %s", filepath.Base(uploadFile))
 	}
 
@@ -397,18 +405,39 @@ func createPasswordZip(backupFile, password string) (string, error) {
 	zipName := baseName + ".zip"
 	zipPath := filepath.Join(filepath.Dir(backupFile), zipName)
 
-	// Use zip command with encryption (-e flag reads password from stdin with -P)
-	args := []string{
-		"-j",           // junk paths (don't store directory structure)
-		"-P", password, // password
-		zipPath,
-		backupFile,
+	fzip, err := os.Create(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create zip file: %w", err)
 	}
 
-	cmd := exec.Command("zip", args...)
-	output, err := cmd.CombinedOutput()
+	// Use closure to ensure files are closed and flushed before stat
+	err = func() error {
+		defer fzip.Close()
+
+		w := zip.NewWriter(fzip)
+		defer w.Close()
+
+		fsrc, err := os.Open(backupFile)
+		if err != nil {
+			return fmt.Errorf("failed to open source backup: %w", err)
+		}
+		defer fsrc.Close()
+
+		// Using AES256 for strong security
+		wsp, err := w.Encrypt(baseName, password, zip.AES256Encryption)
+		if err != nil {
+			return fmt.Errorf("failed to create encrypted entry: %w", err)
+		}
+
+		if _, err := io.Copy(wsp, fsrc); err != nil {
+			return fmt.Errorf("failed to write zip content: %w", err)
+		}
+
+		return nil
+	}()
+
 	if err != nil {
-		return "", fmt.Errorf("zip command failed: %w\nOutput: %s", err, string(output))
+		return "", err
 	}
 
 	// Verify the zip was created
