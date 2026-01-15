@@ -1,0 +1,45 @@
+# Example docker-compose for running gitlab-backup
+# Adjust paths and container names for your setup
+
+services:
+  gitlab-backup:
+    build: .
+    # Or use pre-built image:
+    # image: your-registry/gitlab-backup:latest
+    volumes:
+      # Required: Docker socket to exec into GitLab container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      
+      # Required: GitLab backup directory (where gitlab-rake creates backups)
+      - /srv/gitlab/data/backups:/backups:ro
+      
+      # Required: Rclone configuration
+      - ~/.config/rclone:/config/rclone:ro
+    
+    environment:
+      # GitLab container name (as seen by `docker ps`)
+      GITLAB_CONTAINER: gitlab-web-1
+      
+      # Backup directory inside this container
+      BACKUP_DIR: /backups
+      
+      # File pattern to match backups
+      BACKUP_PATTERN: "*_gitlab_backup.tar"
+      
+      # Maximum age for a valid backup (fail if older)
+      MAX_AGE: 2h
+      
+      # Rclone remotes (comma-separated)
+      # Format: remote_name:path/to/backup/folder
+      RCLONE_REMOTES: "b2:my-gitlab-backups,gdrive:Backups/gitlab"
+      
+      # Path to rclone config (inside container)
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+    
+    # Run once and exit
+    restart: "no"
+
+# Example: Run with cron on the host
+# 0 3 * * * cd /path/to/gitlab-backup && docker-compose run --rm gitlab-backup
+
+# Or use Kubernetes CronJob, systemd timer, etc.
