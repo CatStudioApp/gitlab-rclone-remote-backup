@@ -3,52 +3,54 @@
 
 services:
   gitlab-backup:
-    build: .
     # Or use pre-built image:
-    # image: your-registry/gitlab-backup:latest
+    image: ghcr.io/catstudioapp/gitlab-rclone-remote-backup:main
     volumes:
       # Required: Docker socket to exec into GitLab container
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      
+
       # Required: GitLab backup directory (where gitlab-rake creates backups)
       - /srv/gitlab/data/backups:/backups
-      
+
       # Required: Rclone configuration
       - ~/.config/rclone:/config/rclone:ro
-    
+
     environment:
       # GitLab container name (as seen by `docker ps`)
       GITLAB_CONTAINER: gitlab-web-1
-      
+
       # Backup directory inside this container
       BACKUP_DIR: /backups
-      
+
       # File pattern to match backups
       BACKUP_PATTERN: "*_gitlab_backup.tar"
-      
+
       # Maximum age for a valid backup (fail if older)
       MAX_AGE: 2h
-      
+
       # Rclone remotes (comma-separated)
       # Format: remote_name:path/to/backup/folder
       RCLONE_REMOTES: "b2:my-gitlab-backups,gdrive:Backups/gitlab"
-      
+
       # Path to rclone config (inside container)
       RCLONE_CONFIG: /config/rclone/rclone.conf
-      
+
       # Optional: Password to encrypt backup with zip
       # ZIP_PASSWORD: "your-secure-password"
-      
+
       # Optional: Discord webhook for notifications
       # DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
-      
+
       # Optional: Cron schedule (if set, runs as daemon; otherwise runs once)
       # Examples: "0 3 * * *" (3 AM daily), "0 */6 * * *" (every 6 hours)
       CRON_SCHEDULE: "0 3 * * *"
-    
-    # Run once and exit
-    restart: "no"
 
+      # Optional: Number of backups to keep on each remote (0 = disabled, no pruning)
+      # When set, older backups beyond this limit are automatically deleted after upload
+      NUM_OF_BACKUPS_TO_KEEP: 30
+
+    # Run once and exit
+    restart: "unless-stopped"
 # Example: Run with cron on the host
 # 0 3 * * * cd /path/to/gitlab-backup && docker-compose run --rm gitlab-backup
 

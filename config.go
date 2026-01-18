@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +31,9 @@ type Config struct {
 	// Scheduling
 	CronSchedule string // if set, run on schedule (e.g., "0 3 * * *" for 3 AM daily)
 	RunOnce      bool   // if true, run immediately and exit (ignoring schedule)
+
+	// Retention
+	NumBackupsToKeep int // number of backup files to keep on each remote (0 = disabled)
 }
 
 func parseFlags() Config {
@@ -47,6 +51,7 @@ func parseFlags() Config {
 	cfg.ZipPassword = getEnv("ZIP_PASSWORD", "")
 	cfg.DiscordWebhookURL = getEnv("DISCORD_WEBHOOK_URL", "")
 	cfg.CronSchedule = getEnv("CRON_SCHEDULE", "")
+	cfg.NumBackupsToKeep = getEnvInt("NUM_OF_BACKUPS_TO_KEEP", 0)
 
 	// New flag for manual trigger
 	flag.BoolVar(&cfg.RunOnce, "now", false, "Run backup immediately and exit (overrides cron schedule)")
@@ -76,6 +81,19 @@ func getEnv(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		log.Printf("Warning: invalid integer for %s=%q, using default %d", key, v, defaultVal)
+		return defaultVal
+	}
+	return i
 }
 
 func mustParseDuration(s string) time.Duration {

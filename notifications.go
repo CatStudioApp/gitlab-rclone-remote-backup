@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,7 +12,7 @@ import (
 )
 
 // sendDiscordNotification sends a notification to Discord webhook
-func sendDiscordNotification(cfg Config, success bool, errorMsg string, backupFile string, duration time.Duration) {
+func sendDiscordNotification(cfg Config, success bool, message string, backupFile string, duration time.Duration) {
 	if cfg.DiscordWebhookURL == "" {
 		return
 	}
@@ -21,24 +20,35 @@ func sendDiscordNotification(cfg Config, success bool, errorMsg string, backupFi
 	var embed map[string]interface{}
 
 	if success {
+		fields := []map[string]interface{}{
+			{"name": "File", "value": filepath.Base(backupFile), "inline": true},
+			{"name": "Duration", "value": duration.Round(time.Second).String(), "inline": true},
+			{"name": "Remotes", "value": strings.Join(cfg.RcloneRemotes, ", "), "inline": false},
+		}
+
+		// If there are non-fatal warnings/messages, add them
+		if message != "" {
+			fields = append(fields, map[string]interface{}{
+				"name":   "⚠️ Warnings",
+				"value":  truncate(message, 1000),
+				"inline": false,
+			})
+		}
+
 		embed = map[string]interface{}{
 			"title":       "✅ GitLab Backup Successful",
 			"color":       0x00FF00, // Green
-			"description": fmt.Sprintf("Backup completed and uploaded successfully."),
-			"fields": []map[string]interface{}{
-				{"name": "File", "value": filepath.Base(backupFile), "inline": true},
-				{"name": "Duration", "value": duration.Round(time.Second).String(), "inline": true},
-				{"name": "Remotes", "value": strings.Join(cfg.RcloneRemotes, ", "), "inline": false},
-			},
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"description": "Backup completed and uploaded successfully.",
+			"fields":      fields,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		}
 	} else {
 		embed = map[string]interface{}{
 			"title":       "❌ GitLab Backup Failed",
 			"color":       0xFF0000, // Red
-			"description": fmt.Sprintf("Backup failed with error."),
+			"description": "Backup failed with error.",
 			"fields": []map[string]interface{}{
-				{"name": "Error", "value": truncate(errorMsg, 1000), "inline": false},
+				{"name": "Error", "value": truncate(message, 1000), "inline": false},
 				{"name": "Duration", "value": duration.Round(time.Second).String(), "inline": true},
 			},
 			"timestamp": time.Now().UTC().Format(time.RFC3339),

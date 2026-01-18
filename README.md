@@ -57,6 +57,7 @@ docker-compose run --rm gitlab-backup
 | `ZIP_PASSWORD` | - | (optional) | Password to encrypt backup |
 | `DISCORD_WEBHOOK_URL` | - | (optional) | Discord webhook for notifications |
 | `CRON_SCHEDULE` | - | (optional) | Cron expression for scheduled runs (e.g., `0 3 * * *`) |
+| `NUM_OF_BACKUPS_TO_KEEP` | - | `0` (disabled) | Number of backups to retain on each remote (older backups are pruned) |
 
 ## Required Mounts
 
@@ -115,7 +116,7 @@ spec:
 ## Development
 
 ```bash
-# Run locally (requires Go 1.23+)
+# Run locally (requires Go 1.24+)
 go run . -container gitlab-web-1 -remotes "local:/tmp/test-backup"
 
 # Build

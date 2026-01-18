@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -70,8 +72,18 @@ func runBackup(cfg Config) error {
 		return err
 	}
 
+	// Step 4: Prune old backups on remotes
+	var warnings []string
+	for _, remote := range cfg.RcloneRemotes {
+		if err := pruneOldBackups(cfg, remote); err != nil {
+			msg := fmt.Sprintf("Failed to prune %s: %v", remote, err)
+			log.Printf("Warning: %s", msg)
+			warnings = append(warnings, msg)
+		}
+	}
+
 	duration := time.Since(startTime)
-	sendDiscordNotification(cfg, true, "", uploadFile, duration)
+	sendDiscordNotification(cfg, true, strings.Join(warnings, "\n"), uploadFile, duration)
 	log.Printf("=== Backup completed successfully (took %v) ===", duration.Round(time.Second))
 	return nil
 }
@@ -285,4 +297,104 @@ func createPasswordZip(backupFile, password string) (string, error) {
 
 	log.Printf("Password-protected zip created: %s (size: %d bytes)", zipName, info.Size())
 	return zipPath, nil
+}
+
+// rcloneFile represents a file returned by rclone lsjson
+type rcloneFile struct {
+	Path    string    `json:"Path"`
+	Name    string    `json:"Name"`
+	Size    int64     `json:"Size"`
+	ModTime time.Time `json:"ModTime"`
+	IsDir   bool      `json:"IsDir"`
+}
+
+// pruneOldBackups removes old backup files from a remote, keeping only the most recent N
+func pruneOldBackups(cfg Config, remote string) error {
+	if cfg.NumBackupsToKeep <= 0 {
+		return nil
+	}
+
+	log.Printf("Pruning old backups on %s (keeping %d)...", remote, cfg.NumBackupsToKeep)
+
+	// List files on remote using rclone lsjson
+	args := []string{
+		"--config", cfg.RcloneConfig,
+		"lsjson",
+		remote,
+	}
+
+	cmd := exec.Command("rclone", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rclone lsjson failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	var files []rcloneFile
+	if err := json.Unmarshal(stdout.Bytes(), &files); err != nil {
+		return fmt.Errorf("failed to parse rclone lsjson output: %w", err)
+	}
+
+	// Filter to only backup files (matching pattern, excluding directories)
+	var backups []rcloneFile
+	for _, f := range files {
+		if f.IsDir {
+			continue
+		}
+		// Use path.Match for remote paths (always forward slashes)
+		// Match the base name against backup pattern (support both .tar and .tar.zip)
+		baseName := path.Base(f.Path)
+		matched, err := path.Match(cfg.BackupPattern, baseName)
+		if err != nil {
+			log.Printf("  Warning: invalid backup pattern %q: %v", cfg.BackupPattern, err)
+			return fmt.Errorf("invalid backup pattern: %w", err)
+		}
+		matchedZip, err := path.Match(cfg.BackupPattern+".zip", baseName)
+		if err != nil {
+			// Pattern+.zip is invalid only if base pattern is already broken
+			log.Printf("  Warning: invalid backup pattern %q.zip: %v", cfg.BackupPattern, err)
+		}
+		if matched || matchedZip {
+			backups = append(backups, f)
+		}
+	}
+
+	if len(backups) <= cfg.NumBackupsToKeep {
+		log.Printf("  Found %d backups, no pruning needed", len(backups))
+		return nil
+	}
+
+	// Sort by ModTime descending (newest first)
+	sort.Slice(backups, func(i, j int) bool {
+		return backups[i].ModTime.After(backups[j].ModTime)
+	})
+
+	// Delete files beyond the keep limit
+	toDelete := backups[cfg.NumBackupsToKeep:]
+	log.Printf("  Found %d backups, deleting %d oldest", len(backups), len(toDelete))
+
+	for _, f := range toDelete {
+		// Use f.Path for correct remote path (handles subdirectories)
+		remotePath := fmt.Sprintf("%s/%s", strings.TrimSuffix(remote, "/"), f.Path)
+		log.Printf("  Deleting: %s (age: %v)", f.Path, time.Since(f.ModTime).Round(time.Hour))
+
+		delArgs := []string{
+			"--config", cfg.RcloneConfig,
+			"deletefile", // Use deletefile for precise single-file deletion
+			remotePath,
+		}
+
+		delCmd := exec.Command("rclone", delArgs...)
+		delCmd.Stderr = os.Stderr
+
+		if err := delCmd.Run(); err != nil {
+			log.Printf("  WARNING: Failed to delete %s: %v", f.Path, err)
+			// Continue with other deletions
+		}
+	}
+
+	log.Printf("  Pruning complete")
+	return nil
 }

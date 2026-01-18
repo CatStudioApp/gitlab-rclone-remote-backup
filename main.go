@@ -9,6 +9,11 @@ func main() {
 	log.Printf("Container: %s", cfg.GitLabContainerName)
 	log.Printf("Backup Dir: %s", cfg.BackupDir)
 	log.Printf("Rclone Remotes: %v", cfg.RcloneRemotes)
+	if cfg.NumBackupsToKeep > 0 {
+		log.Printf("Backups to keep: %d", cfg.NumBackupsToKeep)
+	} else {
+		log.Println("Backup retention: disabled")
+	}
 	if cfg.ZipPassword != "" {
 		log.Println("Password protection: enabled")
 	}
