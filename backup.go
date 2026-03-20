@@ -29,6 +29,14 @@ func runBackup(cfg Config) error {
 
 	ctx := context.Background()
 
+	// Snapshot existing backups before creating a new one
+	beforeFiles, err := listBackupFiles(cfg.BackupDir, cfg.BackupPattern)
+	if err != nil {
+		err = fmt.Errorf("failed to snapshot backup directory: %w", err)
+		sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
+		return err
+	}
+
 	// Step 1: Create GitLab backup via Docker exec
 	if err := createGitLabBackup(ctx, cfg); err != nil {
 		err = fmt.Errorf("failed to create GitLab backup: %w", err)
@@ -37,8 +45,7 @@ func runBackup(cfg Config) error {
 	}
 
 	// Step 2: Find and verify the latest backup
-	var err error
-	backupFile, err = findLatestBackup(cfg)
+	backupFile, err = findLatestBackup(cfg, beforeFiles)
 	if err != nil {
 		err = fmt.Errorf("failed to find latest backup: %w", err)
 		sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
@@ -152,8 +159,25 @@ func createGitLabBackup(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-// findLatestBackup finds the most recent backup file in the backup directory
-func findLatestBackup(cfg Config) (string, error) {
+// listBackupFiles returns a map of backup file paths to their modification times
+func listBackupFiles(dir, pattern string) (map[string]time.Time, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, pattern))
+	if err != nil {
+		return nil, fmt.Errorf("failed to glob pattern %q: %w", pattern, err)
+	}
+	files := make(map[string]time.Time, len(matches))
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil {
+			files[m] = info.ModTime()
+		}
+	}
+	return files, nil
+}
+
+// findLatestBackup finds the backup file created by the most recent rake command.
+// It compares the current directory state against a pre-rake snapshot to identify
+// new or modified files, falling back to an age-based check.
+func findLatestBackup(cfg Config, beforeFiles map[string]time.Time) (string, error) {
 	log.Println("Step 2: Finding latest backup...")
 
 	pattern := filepath.Join(cfg.BackupDir, cfg.BackupPattern)
@@ -166,41 +190,64 @@ func findLatestBackup(cfg Config) (string, error) {
 		return "", fmt.Errorf("no backup files found matching pattern %q", pattern)
 	}
 
-	// Sort by modification time (newest first)
 	type fileInfo struct {
 		path    string
 		modTime time.Time
 	}
-	var files []fileInfo
 
+	var allFiles []fileInfo
 	for _, match := range matches {
 		info, err := os.Stat(match)
 		if err != nil {
 			log.Printf("Warning: cannot stat %s: %v", match, err)
 			continue
 		}
-		files = append(files, fileInfo{path: match, modTime: info.ModTime()})
+		allFiles = append(allFiles, fileInfo{path: match, modTime: info.ModTime()})
 	}
 
-	if len(files) == 0 {
+	if len(allFiles) == 0 {
 		return "", fmt.Errorf("no accessible backup files found")
 	}
 
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].modTime.After(files[j].modTime)
+	// Identify new or modified files since the pre-rake snapshot
+	var newFiles []fileInfo
+	for _, f := range allFiles {
+		prevModTime, existed := beforeFiles[f.path]
+		if !existed || !f.modTime.Equal(prevModTime) {
+			newFiles = append(newFiles, f)
+		}
+	}
+
+	if len(newFiles) > 0 {
+		sort.Slice(newFiles, func(i, j int) bool {
+			return newFiles[i].modTime.After(newFiles[j].modTime)
+		})
+		picked := newFiles[0]
+		if info, err := os.Stat(picked.path); err == nil {
+			log.Printf("Backup verified (new file detected): %s (size: %d bytes)", filepath.Base(picked.path), info.Size())
+		} else {
+			log.Printf("Backup verified (new file detected): %s (unable to stat: %v)", filepath.Base(picked.path), err)
+		}
+		return picked.path, nil
+	}
+
+	// Fallback: no new/modified files detected, use age-based check
+	log.Println("Warning: no new backup file detected after rake command, falling back to age-based check")
+	sort.Slice(allFiles, func(i, j int) bool {
+		return allFiles[i].modTime.After(allFiles[j].modTime)
 	})
 
-	latest := files[0]
-
-	// Verify the backup is recent enough
+	latest := allFiles[0]
 	age := time.Since(latest.modTime)
 	if age > cfg.MaxAge {
 		return "", fmt.Errorf("latest backup %q is too old (age: %v, max: %v)", latest.path, age, cfg.MaxAge)
 	}
 
-	info, _ := os.Stat(latest.path)
-	log.Printf("Backup verified: %s (size: %d bytes, age: %v)", filepath.Base(latest.path), info.Size(), age.Round(time.Second))
-
+	if info, err := os.Stat(latest.path); err == nil {
+		log.Printf("Backup verified: %s (size: %d bytes, age: %v)", filepath.Base(latest.path), info.Size(), age.Round(time.Second))
+	} else {
+		log.Printf("Backup verified: %s (age: %v, unable to stat: %v)", filepath.Base(latest.path), age.Round(time.Second), err)
+	}
 	return latest.path, nil
 }
 
