@@ -58,6 +58,7 @@ docker-compose run --rm gitlab-backup
 | `DISCORD_WEBHOOK_URL` | - | (optional) | Discord webhook for notifications |
 | `CRON_SCHEDULE` | - | (optional) | Cron expression for scheduled runs (e.g., `0 3 * * *`) |
 | `NUM_OF_BACKUPS_TO_KEEP` | - | `0` (disabled) | Number of backups to retain on each remote (older backups are pruned) |
+| `LOCAL_BACKUPS_TO_KEEP` | - | `2` (set `0` to disable) | Number of backups retained in `BACKUP_DIR`. With `ZIP_PASSWORD` set, the raw `.tar` is removed after a successful upload and only `.tar.zip` files are kept; older zips beyond this limit are pruned. |
 
 ## Required Mounts
 

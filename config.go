@@ -33,7 +33,8 @@ type Config struct {
 	RunOnce      bool   // if true, run immediately and exit (ignoring schedule)
 
 	// Retention
-	NumBackupsToKeep int // number of backup files to keep on each remote (0 = disabled)
+	NumBackupsToKeep   int // number of backup files to keep on each remote (0 = disabled)
+	LocalBackupsToKeep int // number of backup files to keep locally in BackupDir (default 2, 0 = disabled)
 }
 
 func parseFlags() Config {
@@ -52,6 +53,7 @@ func parseFlags() Config {
 	cfg.DiscordWebhookURL = getEnv("DISCORD_WEBHOOK_URL", "")
 	cfg.CronSchedule = getEnv("CRON_SCHEDULE", "")
 	cfg.NumBackupsToKeep = getEnvInt("NUM_OF_BACKUPS_TO_KEEP", 0)
+	cfg.LocalBackupsToKeep = getEnvInt("LOCAL_BACKUPS_TO_KEEP", 2)
 
 	// New flag for manual trigger
 	flag.BoolVar(&cfg.RunOnce, "now", false, "Run backup immediately and exit (overrides cron schedule)")

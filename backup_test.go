@@ -179,6 +179,72 @@ func TestFindLatestBackup_NoFiles(t *testing.T) {
 	}
 }
 
+func TestPruneLocalBackups_ZipMode_KeepsNewestN(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	// Five .tar.zip files, oldest to newest
+	for i, age := range []time.Duration{5 * time.Hour, 4 * time.Hour, 3 * time.Hour, 2 * time.Hour, 1 * time.Hour} {
+		createTempBackup(t, dir, mustName(i)+"_gitlab_backup.tar.zip", now.Add(-age))
+	}
+	// One stray .tar that should be swept
+	createTempBackup(t, dir, "stray_gitlab_backup.tar", now.Add(-10*time.Minute))
+
+	cfg := Config{
+		BackupDir:          dir,
+		BackupPattern:      "*_gitlab_backup.tar",
+		ZipPassword:        "x", // enables zip mode
+		LocalBackupsToKeep: 2,
+	}
+
+	if err := pruneLocalBackups(cfg); err != nil {
+		t.Fatalf("pruneLocalBackups failed: %v", err)
+	}
+
+	// Only the 2 newest .tar.zip should remain; stray .tar should be gone.
+	zips, _ := filepath.Glob(filepath.Join(dir, "*_gitlab_backup.tar.zip"))
+	if len(zips) != 2 {
+		t.Errorf("expected 2 zip files remaining, got %d", len(zips))
+	}
+	tars, _ := filepath.Glob(filepath.Join(dir, "*_gitlab_backup.tar"))
+	// glob "*_gitlab_backup.tar" also matches "*_gitlab_backup.tar.zip" on some shells,
+	// but filepath.Glob is literal — so this should only count plain .tar
+	for _, p := range tars {
+		if strings.HasSuffix(p, ".tar.zip") {
+			continue
+		}
+		t.Errorf("stray .tar not swept: %s", p)
+	}
+}
+
+func TestPruneLocalBackups_RawMode_KeepsNewestN(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+
+	for i, age := range []time.Duration{3 * time.Hour, 2 * time.Hour, 1 * time.Hour} {
+		createTempBackup(t, dir, mustName(i)+"_gitlab_backup.tar", now.Add(-age))
+	}
+
+	cfg := Config{
+		BackupDir:          dir,
+		BackupPattern:      "*_gitlab_backup.tar",
+		LocalBackupsToKeep: 1,
+	}
+
+	if err := pruneLocalBackups(cfg); err != nil {
+		t.Fatalf("pruneLocalBackups failed: %v", err)
+	}
+
+	tars, _ := filepath.Glob(filepath.Join(dir, "*_gitlab_backup.tar"))
+	if len(tars) != 1 {
+		t.Errorf("expected 1 tar file remaining, got %d", len(tars))
+	}
+}
+
+func mustName(i int) string {
+	return []string{"a", "b", "c", "d", "e", "f"}[i]
+}
+
 func TestFindLatestBackup_MultipleNewFiles_PicksNewest(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -205,4 +271,3 @@ func TestFindLatestBackup_MultipleNewFiles_PicksNewest(t *testing.T) {
 		t.Errorf("expected newest file %s, got %s", expected, result)
 	}
 }
-

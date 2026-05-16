@@ -55,6 +55,7 @@ func runBackup(cfg Config) error {
 
 	// Step 2.5: Optional password-protected zip
 	uploadFile = backupFile
+	zipCreated := false
 	if cfg.ZipPassword != "" {
 		uploadFile, err = createPasswordZip(backupFile, cfg.ZipPassword)
 		if err != nil {
@@ -62,18 +63,19 @@ func runBackup(cfg Config) error {
 			sendDiscordNotification(cfg, false, err.Error(), backupFile, time.Since(startTime))
 			return err
 		}
-		// Ensure temporary zip file is cleaned up after upload (or failure)
-		defer func() {
-			log.Printf("Cleaning up temporary zip: %s", uploadFile)
-			if err := os.Remove(uploadFile); err != nil {
-				log.Printf("Warning: failed to remove temporary zip: %v", err)
-			}
-		}()
+		zipCreated = true
 		log.Printf("Created password-protected zip: %s", filepath.Base(uploadFile))
 	}
 
 	// Step 3: Upload to rclone remotes
 	if err := uploadToRemotes(cfg, uploadFile); err != nil {
+		// Upload failed: discard the zip so we don't leave half-uploaded artifacts
+		if zipCreated {
+			log.Printf("Cleaning up zip after upload failure: %s", uploadFile)
+			if rmErr := os.Remove(uploadFile); rmErr != nil {
+				log.Printf("Warning: failed to remove zip: %v", rmErr)
+			}
+		}
 		err = fmt.Errorf("failed to upload backup: %w", err)
 		sendDiscordNotification(cfg, false, err.Error(), uploadFile, time.Since(startTime))
 		return err
@@ -89,9 +91,89 @@ func runBackup(cfg Config) error {
 		}
 	}
 
+	// Step 5: After a successful zip upload, drop the raw .tar so the local copy is just the .zip
+	if zipCreated {
+		if err := os.Remove(backupFile); err != nil {
+			msg := fmt.Sprintf("Failed to remove original tar %s: %v", filepath.Base(backupFile), err)
+			log.Printf("Warning: %s", msg)
+			warnings = append(warnings, msg)
+		} else {
+			log.Printf("Removed original tar (kept .zip locally): %s", filepath.Base(backupFile))
+		}
+	}
+
+	// Step 6: Prune old local backups
+	if cfg.LocalBackupsToKeep > 0 {
+		if err := pruneLocalBackups(cfg); err != nil {
+			msg := fmt.Sprintf("Failed to prune local backups: %v", err)
+			log.Printf("Warning: %s", msg)
+			warnings = append(warnings, msg)
+		}
+	}
+
 	duration := time.Since(startTime)
 	sendDiscordNotification(cfg, true, strings.Join(warnings, "\n"), uploadFile, duration)
 	log.Printf("=== Backup completed successfully (took %v) ===", duration.Round(time.Second))
+	return nil
+}
+
+// pruneLocalBackups keeps only the N most recent backups in cfg.BackupDir.
+// When ZipPassword is set, the canonical local artifact is "*.tar.zip"; otherwise it's "*.tar".
+// Stray files of the *other* type are also swept so disk usage doesn't drift.
+func pruneLocalBackups(cfg Config) error {
+	keepPattern := cfg.BackupPattern
+	otherPattern := cfg.BackupPattern + ".zip"
+	if cfg.ZipPassword != "" {
+		keepPattern, otherPattern = otherPattern, keepPattern
+	}
+
+	log.Printf("Pruning local backups in %s matching %q (keeping %d)...", cfg.BackupDir, keepPattern, cfg.LocalBackupsToKeep)
+
+	keepMatches, err := filepath.Glob(filepath.Join(cfg.BackupDir, keepPattern))
+	if err != nil {
+		return fmt.Errorf("failed to glob %q: %w", keepPattern, err)
+	}
+
+	type fileInfo struct {
+		path    string
+		modTime time.Time
+	}
+	var files []fileInfo
+	for _, m := range keepMatches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		files = append(files, fileInfo{path: m, modTime: info.ModTime()})
+	}
+
+	if len(files) <= cfg.LocalBackupsToKeep {
+		log.Printf("  Found %d local backups, no pruning needed", len(files))
+	} else {
+		sort.Slice(files, func(i, j int) bool { return files[i].modTime.After(files[j].modTime) })
+		toDelete := files[cfg.LocalBackupsToKeep:]
+		log.Printf("  Found %d local backups, deleting %d oldest", len(files), len(toDelete))
+		for _, f := range toDelete {
+			log.Printf("  Deleting local: %s", filepath.Base(f.path))
+			if err := os.Remove(f.path); err != nil {
+				log.Printf("  WARNING: failed to delete %s: %v", f.path, err)
+			}
+		}
+	}
+
+	// Sweep any stray opposite-type files (e.g., leftover .tar when zip mode is active).
+	strays, err := filepath.Glob(filepath.Join(cfg.BackupDir, otherPattern))
+	if err == nil && len(strays) > 0 {
+		log.Printf("  Sweeping %d stray local file(s) matching %q", len(strays), otherPattern)
+		for _, s := range strays {
+			if err := os.Remove(s); err != nil {
+				log.Printf("  WARNING: failed to remove stray %s: %v", s, err)
+			} else {
+				log.Printf("  Removed stray: %s", filepath.Base(s))
+			}
+		}
+	}
+
 	return nil
 }
 
